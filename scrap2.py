@@ -4,6 +4,7 @@ from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 import pandas as pd
 import time
@@ -47,7 +48,25 @@ health_name = ["Cash & Short Term Investments","Accounts Receivable","Inventory"
          
 def get_eda():
     eda = pd.read_csv('eda.csv',sep=";")
-    return eda         
+    return eda  
+
+
+### Crée le dataframe contenant la liste des stock en fusionnant le NASDAQ et l'EDA PAris
+def get_stock_list():
+    df_eda = get_eda()
+    df_nasdaq = pd.read_csv('nasdaq_symbol.csv',sep=";")
+    df_nasdaq['Market'] = "Nasdaq"
+    df_nasdaq['Trading Currency'] = "USD"
+
+    df_nasdaq.rename(columns = {
+        "Symbol":"Symbol",
+        "Company Name":"Name"
+    }, inplace = True)
+
+    df_symbol = pd.concat([df_eda,df_nasdaq],sort=False)
+    df_symbol.sort_values("Symbol", inplace = True) 
+    df_symbol.drop_duplicates(subset ="Symbol", keep = False, inplace = True)
+    return df_symbol
                 
 def main(symbol,name_stock,i):
 
@@ -63,6 +82,8 @@ def main(symbol,name_stock,i):
             new_col.append(item)
         return new_col
 
+
+## capture un contenu avec une regex particulière
     def get_content(content,regex_expr,name):
         col_names = [name]
         for item in content:
@@ -79,6 +100,8 @@ def main(symbol,name_stock,i):
         return col_names
 
 
+
+### Capture avec regex le contneu du tableau principal et retourn une liste de liste des données
     def fin(content,starter):
         reg = r"(?:(?<=i[0-9][0-9]\">)(.*?)(?=(<\/td>))|(?<=i[0-9]\">)(.*?)(?=(<\/td>)))"
         col_names = [starter]
@@ -97,6 +120,7 @@ def main(symbol,name_stock,i):
                     print(lines)
         return col_names
 
+## Crée le dataframe du tableau principal financial section
     def get_financial_section():
         end_list = []
         results = soup.find(id='financeWrap')
@@ -107,16 +131,8 @@ def main(symbol,name_stock,i):
         df['Section'] = "Financial"
         return df
 
-    def get_subtab(tab,list_name,str_year):
-        reg = r"(?:(?<=i[0-9][0-9]\">)(.*?)(?=(<\/td>))|(?<=i[0-9]\">)(.*?)(?=(<\/td>)))"
-        results = soup.find(id=tab)
-        res2 = results.findAll('tr')
-        get_year(str_year)
-        for i in range(2,len(res2)-1,2):
-            print(get_content(res2[i].contents, reg,new_list(list_name)[i]))
-    
-        print("\n")
 
+#### Capture un onglet (Growth, Financial Health, etc) et retourne une liste de liste de ses paramètres
     def get_subtab(start,tab,list_name,str_year):
         end_list = []
         reg = r"(?:(?<=i[0-9][0-9]\">)(.*?)(?=(<\/td>))|(?<=i[0-9]\">)(.*?)(?=(<\/td>)))"
@@ -128,19 +144,15 @@ def main(symbol,name_stock,i):
         return end_list
         print("\n")
     
-
+#### Crée et retourne le dataframe correspondant à l'onglet capturé 
     def create_df(start,tab,list_name,str_year):
         df_to_list = get_subtab(start,tab,list_name,str_year)
         df = pd.DataFrame(df_to_list, columns = get_year())
         df['Section'] = str_year
         return df
-
-    def clean_df(x):
-        if x != None:
-            if x == "—":
-                print(x)
-                return x.replace("—","AAA")    
-
+   
+#### Execute toutes les captures : onglet financial puis les sous onglets, 
+### Les transforme en liste de liste puis les concatene et retourne le dataframe correspondant
     def get_df_stock(name_stock,symbol):
         df_financial = get_financial_section()
         df_profitability = create_df(0,"tab-profitability", profitability_name,"Profitability")
@@ -156,9 +168,13 @@ def main(symbol,name_stock,i):
         df_tot = df_tot.dropna()
         return df_tot.reset_index(drop=True)
     
+### Démarre la session Selenium (en mode headless) et capture l'URL
+## Si l'URL n'est pas bonne et renvoie un 404, passage au prochain de la liste (exception throws)
     def setup_session(symbol, name_stock,i):
-        url_symbol = "http://financials.morningstar.com/ratios/r.html?t=" + symbol                
-        driver = webdriver.Chrome()
+        url_symbol = "http://financials.morningstar.com/ratios/r.html?t=" + symbol     
+        options = webdriver.ChromeOptions() 
+        options.headless = True           
+        driver = webdriver.Chrome(options=options)
         driver.get(url_symbol)
         html = driver.page_source
         soup = BeautifulSoup(html,features="lxml")
@@ -182,18 +198,22 @@ def main(symbol,name_stock,i):
     driver.close()
     exit()
 
-df_eda = get_eda()
-newL2 = []
+################# Execution ##############
 
-for i in range(300):
-    name_stock = df_eda.iloc[i]['Name']
-    symbol = df_eda.iloc[i]['Symbol']
+df_symbol = get_stock_list()
+list_companies_scraped = []
+
+for i in range(1000):
+    name_stock = df_symbol.iloc[i]['Name']
+    symbol = df_symbol.iloc[i]['Symbol']
     try:
         df = main(symbol,name_stock,i)
         newL2.append(df)
     except:
         pass
 
-df_fus = pd.concat(newL2).reset_index(drop=True)
-df_fus.to_csv("df1_1290_1.csv")
+df_scraped = pd.concat(list_companies_scraped).reset_index(drop=True)
+df_scraped.to_csv("df_symbol_1000.csv")
+
+
 
